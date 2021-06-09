@@ -1,0 +1,354 @@
+---
+title: "Predictive Analytics Linear and Nonlinear Models Using Auto data"
+author: "Chris Schmidt"
+date: '2019'
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+
+## Linear and Nonlinear Models using the Auto Data from the ISLR Package
+
+In this project we are building and analyzing linear and nonlinear models using the Auto data set found in the ISLR package in R. 
+
+We are looking to answer a few questions:
+
+- Is at least one of the predictors useful in predicting the response?
+- What is the best combination of predictors or is there one dominant predictor that is best?
+- How well does the model specified predict the response?
+- What response should be predicted and how accurate is the prediction given a set of attributes at predictor values?
+- Do we have a linear or non-linear relationship?
+
+With linear regression we want to know if there is a relationship between the response and predictors. 
+
+The model form given response $Y$ and predictors $X_j$ is 
+$$Y=\beta_0+\beta_1X_1+...+\beta_pX_p$$
+for predictors $X_j$ for $j=1,...,p$ and where $\beta_j$ is the association between the $j$th variable and the response $Y$. 
+
+The interpretation of $\beta_j$ is the **average** effect on $Y$ of a one unit increase in $X_j$, **holding all other predictors fixed**.  
+
+Because we don't know the regression coefficients we need to estimate them so that given the estimates $\hat{\beta_0}, \hat{\beta}_1, ..., \hat{\beta_p}$ we can make predictions using the formula
+
+$$\hat{y}=\hat{\beta_0}+ \hat{\beta}_1x_1+ \hat{\beta_2}x_2+...+ \hat{\beta_p}x_p$$
+
+We find the parameter estimates using least square to solve for 
+
+$$\begin{aligned}
+RSS&=\sum_{i=1}^n(y_i-\hat{y})^2\\
+&=\sum_{i=1}^n(y_i-\hat{\beta}_0-\hat{\beta}_1x_{i1}-\hat{\beta}_2x_{i2}-...-\hat{\beta}_px_{ip})^2\\
+\end{aligned}$$
+
+
+Using the null hypothesis 
+
+
+$$H_0=\beta_1=\beta_2=...=\beta_p=0$$
+
+for predictors $1,...,p$ we can compare to the alternative hypothesis
+
+$$H_A: \text{ at least one } \beta_j \text{ is non-zero. }$$
+
+by performing this hypothesis test using the **F-statistic** 
+
+$$F=\frac{(TSS-RSS)/p}{RSS/(n-p-1)}$$
+
+where $TSS=\sum(y_i-\bar{y})^2$ and $RSS=\sum(y_i-\hat{y}_i)^2$.
+
+Where the linear model assumptions are correct we can show that 
+
+$$E[RSS/(n-p-1)]=\sigma^2$$
+and, if the null hypothesis is true, 
+
+$$E[(TSS-RSS)/p]=\sigma^2$$
+This results in an ability to use the **F-statistic** to disern the strength of the relationship between the response and the predictors. If there is no relationship between the two, the **F-statistic** will have a value close to $1$ and if the alternative hypothesis, $H_A$ is true, then $E[(TSS-RSS)/p]>\sigma^2$ where **F** will be larger than $1$. 
+   
+## Set Up Your Project and Load Libraries
+
+We need the $\texttt{ISLR}$ and $\texttt{mgcv}$ packages. 
+
+```{r setup, include=F}
+
+my_packages <- c("ISLR", "mgcv")
+my_packages <- subset(my_packages, subset=!my_packages %in% rownames(installed.packages()))
+if (length(my_packages)>0) install.packages(my_packages, repos = "http://cran.rstudio.com")
+if (length(my_packages)==0) cat('The two packages have been installed in your computer.', '\n')
+library(ISLR)
+library(mgcv)
+```
+## The Auto data
+
+This data set contains 392 observations with 9 attributes as detailed below. 
+
+- mpg miles per gallon
+- cylinders Number of cylinders between 4 and 8
+- displacement Engine displacement (cu. inches)
+- horsepower Engine horsepower
+- weight Vehicle weight (lbs.)
+- acceleration 
+- Time to accelerate from 0 to 60 mph (sec.)
+- year Model year (modulo 100)
+- origin Origin of car (1. American, 2. European, 3. Japanese)
+- name Vehicle name
+
+We examine the structure of the data set by using the **str()** function with the data set as the argument. 
+
+```{r}
+str(Auto)
+```
+
+The original data contained 408 observations but 16 observations with missing values were removed. Using the head() function on the data set we can look at the first 6 rows of data and the column headers. 
+
+
+```{r}
+head(Auto)
+```
+
+
+This dataset was taken from the StatLib library which is maintained at Carnegie Mellon University. The dataset was used in the 1983 American Statistical Association Exposition. 
+
+## Building our Predictive Models
+
+Note that 'origin' is a number in the Auto data set. We want it to be a categorical variable so an important step is to make the transformation to ensure that the variable 'origin' is treated properly for our needs.
+
+We will use the **as.factor()** function to transform the 'origin' variable to a factor and also to split our data set into a training set and a testing set using a 70/30 split of the data. We use the **set.seed()** function to produce the same split of the date set each time we run the test/train split for consistency purposes.
+
+After transforming the 'origin' attribute to a factor type, the Auto data set is renamed Auto_S and we name the training data set 'auto' in lower case. 
+
+
+
+```{r}
+class(Auto$origin)
+
+set.seed(1)
+n=dim(Auto)[1]
+train <- sample(n, n*0.7)
+
+Auto_S <- Auto
+Auto_S$origin <- as.factor(Auto$origin)
+auto <- Auto_S[train, ]
+```
+
+Using the GGally package and the **ggpairs()** function we can look at a pairs plot to develop a visual understanding of the relationships and influences the attributes have on each other. 
+
+```{r, eval=F}
+library(GGally)
+ggpairs(Auto_S, columns = c(2:7, 1,8), upper = list(continuous = ggally_density, combo ='box'),   lower = list(continuous = wrap("smooth", method = "loess"), combo='facetdensity') )
+```
+
+We can look at the first few rows of our transformed data set and the structure, **Auto_S**. 
+
+```{r}
+head(Auto_S)
+```
+
+```{r}
+str(Auto_S)
+```
+
+### Building the first model
+
+We will call our first linear model **m1** with 'mpg' as our response variable and using 'cylinders', 'displacement', 'horsepower', 'weight', and 'acceleration' as our predictors for the miles per gallon of the vehicles in the data.   
+
+```{r}
+m1 <- lm(mpg ~ cylinders + displacement 
+         + horsepower + weight + acceleration, data = Auto_S)
+```
+
+The **summary()** function generates information about the residuals, the p-values and standard errors of the predictors and model strength as indicated by the **F-statistic** and the **$R^2$R** and adjusted **$R^2$** values. 
+
+For the model **m1** we have an adjusted $R^2$ value of $0.7039$ which indicates that the model explains roughly $70$% of the variance in the response variable. The **F-statistic** value of $186.9$ on 5 predictors lets us reject $H_0$ indicating that there is a relationship between the predictors and reponse. 
+The p-values for each predictor test the null hypothesis $H_0$ that the coefficient has no effect on the response variable. If the p-value is below the significance level (the default is $5$%) then we reject the null hypothesis and conclude that the predictor contributes to changes in the response variable. 
+
+The model summary shows that horsepower and weight are significant contributers to changes in the response variable for this combination of the predictor variable. 
+
+```{r}
+summary(m1)
+```
+
+Plotting the model generates a view of the residual versus fitted values, a Quantile-Quantile plot for the normality assumption of the residuals, a scale-location plot for standardized versus fitted values and a Cook's distance metric for residuals verus leverage. 
+
+```{r}
+par(mfrow=c(2,2))
+plot(m1)
+```
+
+
+
+## Polynomial regression models with interraction effect between $\texttt{horsepower}$ and $\texttt{origin}$
+
+If we have a non-linear relationship between the response and predictors we can extend the linear model using polynomial regression by adding interaction effects. Interaction effects can be modeled by using the product of two predictors or by using a polynomial applied to a predictor. 
+
+For example, if we include a third predictor in a multiple linear regression model with two predictors where the product of $X_1$ and $X_2$ produces the interaction term $X_1X_2$ as our third predictor, our model would look like
+
+$$Y=\beta_0+\beta_1X_1+\beta_2X_2+\beta_3X_1X_2 + \epsilon$$
+which can be represented as 
+$$\begin{aligned}
+Y&=\beta_0+(\beta_1 + \beta_3X_2)X_1+\beta_2X_2+\beta_2X_2+\epsilon\\
+&=\beta_0+\tilde{\beta}_1X_1+\beta_2X_2+\epsilon
+\end{aligned}$$
+
+where $\tilde{\beta}_1=\beta_1+\beta_3X_2$.
+
+We can also replace the standard linear model with a polynomial function where we have a nonlinear relationship between the response and the predictors using 
+
+$$y_i=\beta_0+\beta_1x_i+\beta_2x_i^2+...+\beta_d x_i^d+\epsilon$$
+where $d$ is the degree of the polynomial. The polynomial can be applied to specific attributes
+
+Below we build out three models $m2, m3, m4$ to look at several combinations of interaction effects on the training data. 
+
+```{r}
+m2 <- lm(mpg ~ cylinders + poly(displacement,5) + weight 
+         + acceleration + poly(year,2) + I(displacement*weight)
+         + weight:origin, data = Auto_S)
+
+test_pre <- predict(m2, newdata = Auto_S[-train, ])
+mean(abs(test_pre - Auto_S[-train, ]$mpg))
+
+
+
+m3 <- lm(mpg ~ cylinders + poly(displacement, 2) + horsepower + weight 
+         + acceleration + poly(year, 2) + I(horsepower*weight) + horsepower:origin
+         + I(horsepower * displacement), data = Auto_S)
+
+test_pre <- predict(m3, newdata = Auto_S[-train, ])
+mean(abs(test_pre-Auto_S[-train, ]$mpg))
+mean(abs(residuals(m3)))
+
+m4 <- lm(mpg ~ cylinders + poly(displacement, 2) + weight + acceleration
+         + poly(year, 2) + I(displacement * weight) + I(horsepower * displacement)
+         + horsepower:origin, data = Auto_S)
+
+test_pre <- predict(m4, newdata = Auto_S[-train, ])
+mean(abs(test_pre-Auto_S[-train, ]$mpg))
+mean(abs(residuals(m4)))
+
+cat('The testing mean absolute error of model m5 is', mean(abs(test_pre-Auto_S[-train, ]$mpg)), '.\n')
+
+summary(m2)
+summary(m3)
+summary(m4)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(m2)
+```
+
+
+```{r}
+par(mfrow=c(2,2))
+plot(m3)
+```
+
+
+```{r}
+par(mfrow=c(2,2))
+plot(m4)
+```
+
+
+## Can we develop a model using $\texttt{lm()}$ with lower test mean absolute error than m4? 
+
+Yes. By adding an interaction term I(displacement*acceleration) to the model, m4, the testing mean absolute error dropped to 1.838677.
+
+The MAE (mean absolute error) is a measure of the errors between between the the target and the predicted variables. It is the sum of absolute differences between the two and is represented by 
+$$MAE = \frac{\sum_{i=1}^n\vert y_i-y_i^p\vert}{n}$$
+We find the MAE by using the **mean(), and abs()** functions on the difference between the results of running the **m4T** model created below on the test data (the holdout data) and subtracting the training data results for the model as shown below. 
+
+```{r}
+m4T <- lm(mpg ~ cylinders + poly(displacement,2) + weight + acceleration 
+          + poly(year,2) + I(displacement*weight) + I(horsepower*displacement) 
+          + horsepower:origin + I(displacement * acceleration), data = Auto_S)
+
+test_pre <- predict(m4T, newdata = Auto_S[-train, ])
+
+mean(abs(test_pre - Auto_S[-train, ]$mpg))
+
+cat('The testing mean absolute error of model m4T is', mean(abs(test_pre-Auto_S[-train, ]$mpg)), '.\n')
+```
+
+## Spline Regression models
+
+This is a cursory introduction to spline repgression modeling using the **gam()** function to build generalized additive models 
+
+If we fit piece-wise low degree polynomials over dfference regions of our predictors $X_i$ where the coefficients $\beta_0, \beta_1, \beta_2,...,\beta_p$ vary across $X$ we create a piece-wise polynomial regression. The points where the coeffients change are called **knots**. 
+
+A piece-wise polynomial for a cubic regression would have the form
+
+$$y_i=\beta_0+\beta_1x_i+\beta_2x_i^2+\beta_3x_i^3+\epsilon$$
+
+and a piece-wise cubic polynomial with a single knot at a point c has the form
+
+$$\begin{aligned}
+y_i=
+\begin{cases}
+\beta_0+\beta_{11}x_i+\beta_{21}x_i^2+\beta_{31}x_i^3+\epsilon \text{ if } x_i<c;\\
+\beta_0+\beta_{12}x_i+\beta_{22}x_i^2+\beta_{32}x_i^3+\epsilon \text{ if } x_i\geq c\\
+\end{cases}
+\end{aligned}$$
+The big idea behind regression splines is the flexibility introduced by allowing the introduction of more knots and leaving the degree unchanged which generally produces more stability.
+
+Below we create three models using this approach and generate the **summary()** output.
+
+
+
+```{r}
+set.seed(1)
+n <- dim(Auto)[1]
+train <- sample(n, n*0.7)
+
+Auto_S <- Auto
+Auto_S$origin <- as.factor(Auto$origin)
+auto=Auto_S[train, ]
+
+m1_sr <- gam(mpg ~ cylinders + s(year) + s(acceleration) + s(weight) 
+             + s(horsepower) + ti(horsepower, weight, by=origin) 
+             + ti(acceleration, horsepower) + ti(acceleration, weight), data = auto)
+
+test_pre <- predict(m1_sr, newdata = Auto_S[-train, ])
+mean(abs(test_pre - Auto_S[-train, ]$mpg))
+mean(abs(residuals(m1_sr)))
+
+
+m2_sr <- gam(mpg ~ cylinders + s(year) + acceleration + s(weight) 
+             + s(horsepower) + ti(weight, horsepower, by = origin), data=auto)
+
+test_pre <- predict(m2_sr, newdata=Auto_S[-train, ])
+mean(abs(test_pre - Auto_S[-train, ]$mpg))
+
+
+m3_sr <- gam(mpg ~ cylinders + s(year) + acceleration + s(weight) 
+             + s(horsepower, by =origin) + ti(acceleration, horsepower) 
+             +  ti(weight, horsepower, by = origin), data = auto)
+
+test_pre <- predict(m3_sr, newdata = Auto_S[-train, ])
+mean(abs(test_pre - Auto_S[-train, ]$mpg))
+mean(abs(residuals(m3_sr)))
+
+summary(m1_sr)
+summary(m2_sr)
+summary(m3_sr)
+```
+## Develop a model using $\texttt{gam()}$ with lower test mean absolute error than m1_sr.
+
+m1_sr <- gam(mpg ~ cylinders + s(year) + s(acceleration) + s(weight) 
+             + s(horsepower) + ti(horsepower, weight, by=origin) 
+             + ti(acceleration, horsepower) + ti(acceleration, weight), data = auto)
+
+```{r}
+
+mT_sr <- gam(mpg ~ cylinders + s(year) + acceleration + s(weight) 
+             + s(horsepower, by = origin) + ti(acceleration, horsepower)
+             +  ti(weight, horsepower, by = origin)
+             + ti(acceleration, displacement), data = auto)
+
+test_pre <- predict(mT_sr, newdata = Auto_S[-train, ])
+
+ 
+mean(abs(test_pre - Auto_S[-train, ]$mpg))
+
+```
+The mT_sr model which added ti(acceleration, displacement) to the mix of predictors has a lower test mean absolute error at 1.792112 than the m1_sr model which was 1.802063.
+
+

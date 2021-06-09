@@ -1,0 +1,203 @@
+---
+title: "Randon Forest with Grid Search Tuning"
+author: "Chris Schmidt"
+date: '11/18/2019'
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+
+## Random Forest with Grid Search Tuning of Hyperparameters
+
+Random forests are a type of decision tree model process where multiple decorrelated trees are built on bootstrapped training samples. 
+
+Tree based methods can be used for regression and for classification modeling. They stratify or segment the predictor space into a number of simple regions. 
+
+With regression trees we take the response variable and make a split in the data for the predictor that has the most influence on the response based on some rule, perhaps the mean. Each region above and below the split point are then evaluated for the next most important predictor and a similar split occurs. This repeats a specified number of times per the rules that are assigned. 
+
+There are essentially two steps:
+1. Divide the predictor space, the set of possible values for $X_1, X_2, ..., X_p$ into $J$ distinct and non-overlapping regions, $R_1, R_2,...,R_j$.
+2. For every observation that falls in region $R_j$ the same prediction is made using the mean of the response values for training observations in $R_j$. 
+
+The predictor space is divided into high-dimension rectangles, or *hyper-boxes*. The goal is to find boxes $R_1, R_2, ...,R_j$ that minimize the residual sum of squares, RSS, given by 
+$$\sum_{j=1}^J\sum_{i\in R_j}(y_i-\hat{y}_{R_j})^2,$$
+where $\hat{y}_{R_j}$ is the mean response for the training observations in the $j$th *hyper-box*. Because this is very computationally expensive tp consider all possible partitions, a *top-down, greedy* approach called *bianry splitting* is used. The approach begins at the top of the tree where all observations are in the same region and makes the best split at each step which is the reason for the term *greedy*. 
+
+For recursive  binary splitting, select predictor $X_j$ and a specified cutpoint *s* such that splitting the regions of predictor space in which $X_j$ takes on a value in relation to *s* represented $\{X\vert X_j<s\}$ and $\{X\vert X_j\geq s\}$ which leads to the largest reduction in RSS.
+
+This defines a pair of half planes
+
+$$R_1(j,s)=\{X\vert X_j<s\}\text{ and } R_2(j,s) = \{X\vert X_j\geq s\}$$
+and we want to minimize the equation
+$$\sum_{i:x_i\in R_1(j,s)}(y_i-\hat{y}_{R_1})^2+\sum_{i:x_i\in R_s(j,s)}(y_i-\hat{y}_{R_s})^2$$
+for a value of $j$ and *s* that we need to find. Thge process is repeated in each region formed until a stopping criterion is reached. 
+
+Random forests build a number of decision trees but when the trees are built each time a split is considered, a random sample of $m$ predictors is chosen as split candidates from the full set of $p$ predictors. The split can only use one of the $m$ predictors. Typically $m\approx\sqrt{p}$ is the number of predictors considered at each split. 
+
+### Use grid search to tune a random forest model for the Spam7 data in library(DAAG). 
+
+1. Separate the data into a training set (70%) and a testing set (30%). Tune the model by the grid search method and report the testing error. 
+
+2. Produce a plot to compare the different settings of the hyper-parameters as the graph on the last page of  chapter-8-tuning-of-bagging-and-random-forest.pdf, or chapter-8-Gradient-Boosting-Machine-classification.pdf.
+
+#### Load the Packages and Libraries needed.
+
+We need the ISLR, rpart, and rpart.plot. If you cannot install rpart.plot inside Rstudio, you can download the release file and install if from R console.  
+
+```{r setup, include=FALSE}
+
+my_packages <- c("ISLR", "rpart", "rpart.plot", "randomForest", "caret", "DAAG", "ggplot2", "lattice", "tuneRanger")
+my_packages <- subset(my_packages, subset=!my_packages %in% rownames(installed.packages()))
+
+if (length(my_packages > 0)) install.packages(my_packages, repos = "http://cran.rstudio.com")
+```
+
+### Create the testing and training sets for this project.
+
+#### For the spam7 data set from the DAAG library, use set.seed() and build a randomized training set with 70% of the data and a test set with the remaining 30%. 
+
+```{r}
+library(DAAG)
+library(caret)
+library(ggplot2)
+set.seed(123)
+data(spam7)
+dataset <- spam7
+inTraining <- createDataPartition(dataset$yesno, p = .7, list = FALSE)
+training <- dataset[ inTraining,]
+testing  <- dataset[-inTraining,]
+```
+
+## Create the random forest model with tuning parameters
+
+### Run model on training set with set parameters
+```{r}
+library(randomForest)
+randomForest.spam7 = randomForest(yesno ~., 
+                            data = training, 
+                            mtry = 5,
+                            ntree = 500)
+print(randomForest.spam7)
+plot(randomForest.spam7)
+```
+
+### ****Notice OOB estimate of error rate on training set in output above.
+
+### Look at the Variable importance. Use the importance() and varImpPlot() functions to evaluate the MeanDecreaseGini values 
+```{r}
+importance(randomForest.spam7)
+varImpPlot(randomForest.spam7)
+```
+
+### Make predictions with testing set and show the error.
+```{r}
+Pred.randomForest.spam7 = predict( randomForest.spam7, testing)
+mean((Pred.randomForest.spam7!=testing$yesno)^2) 
+```
+### ****Note the error above of 11.24% for the prediction using the test set and the random forest model.
+
+
+## Use grid search to tune the model.
+
+With a random forest the hyperparameters are the number of decision trees in the forest and the number of predictors considered by each tree with splitting a node. 
+
+```{r}
+tune.grid <- expand.grid(.mtry = c(1:5))
+rand.forestTrain <- train(yesno ~., 
+                          data = training,
+                          method = "rf",
+                          metric = "Accuracy",
+                          tuneGrid = tune.grid,
+                          trControl = trainControl(method = "cv",
+                                                   number = 10)
+                          )
+                          
+plot(rand.forestTrain)
+print(rand.forestTrain)
+```
+### ****To find the error subtract the largest value in the Accuracy column above from one. I.e. (1 - 0.8764687) = 0.1235313 or 12.35% (rounded).
+
+
+### A. Expand upon the hyperparameter grid search model.
+
+```{r}
+optimal_trees = list()
+
+hyperparameter.grid <- expand.grid(
+maxnodes = c(5, 9, 50, nrow(training)),
+ntree = c(100, 250, 500)
+)
+
+nr = nrow(hyperparameter.grid)
+tuneGrid <- expand.grid(.mtry = c(2, 5)) # best value from last step is 5
+
+for (i in 1:nrow(hyperparameter.grid)) {
+
+    set.seed(999)
+    rf_maxtrees <- train(yesno ~.,
+                    data = training,
+                    method = "rf",
+                    metric = "Accuracy",
+                    tuneGrid = tuneGrid,
+                    trControl = trainControl(method = "cv",
+                                                   number = 10),
+                    importance = TRUE,
+                    nodesize = 5,
+                    maxnodes = hyperparameter.grid[i,1],
+                    ntree = hyperparameter.grid[i,2])
+    key <- paste(hyperparameter.grid[i,1], hyperparameter.grid[i,2], sep = '-')
+    optimal_trees[[key]] <- rf_maxtrees
+}
+
+results_mtry <- resamples(optimal_trees)
+summary(results_mtry)
+
+# modified code from the following website: https://www.guru99.com/r-random-forest-tutorial.html
+```
+
+### ****The best model in the output above for Accuracy shows an error of (1 - 0.9006211) = 0.0993789 or 9.94% (rounded).
+
+```{r}
+randomForest.spam7 <- train(yesno ~.,
+                    data = training,
+                    method = "rf",
+                    metric = "Accuracy",
+                    tuneGrid = tuneGrid,
+                    trControl = trainControl(method = "cv",
+                                                   number = 10),
+                    importance = TRUE
+                    )
+print(randomForest.spam7)
+```
+
+### B. Store the Accuracy in a data.frame()
+
+```{r}
+seq(from = 3, to = 25, length.out = 25) 
+
+
+mtx_cv = results_mtry$values[, seq(from = 3, to = 25, length.out = 25)]
+                                                                    
+colnames(mtx_cv) = c(paste(hyperparameter.grid[,1], hyperparameter.grid[,2], sep = '-'), 'default') 
+```
+
+## V. Use a box-plot to display the results of the different tuning parameters.
+
+```{r}
+library(ggplot2)
+library(reshape2)
+
+M2 <- melt(mtx_cv, measure.vars = colnames(mtx_cv))
+
+M2 <- melt(mtx_cv, measure.vars = colnames(mtx_cv))
+
+ggplot(M2,aes(x = variable, y = value)) +
+  geom_boxplot() + xlab("Model") +
+   ylab("Accuracy & Kappa") +
+     stat_summary(fun.y = mean,shape = 1,col = 'red',geom = 'point')+
+       ggtitle("Boxplot of Cross Validation Accuracy over 10 Runs for random forests")+
+         theme(plot.title = element_text(hjust = 0.5))
+
+```
+

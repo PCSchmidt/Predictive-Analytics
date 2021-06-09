@@ -1,0 +1,371 @@
+---
+title: "Classifiers: LDA, QDA, KNN Model Evaluation"
+author: "Chris Schmidt"
+date: "10/24/2019"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ISLR)
+library(MASS)
+library(boot)
+library(class)
+library(mgcv)
+library(caret)
+```
+## Evaluating AutoData using Linear Discriminant Analysis, Quadratic Discriminant Analysis, Logistic Regression and KNN
+
+This project comes from *An Introduction to Statistical Learning with Applications in R*, by James, Witten, Hastie, and Tibshirani, using the problem set in chapter 4, problem 11. 
+
+There is a discussion and examination of the mathematics and intuition of the LDA, QDA, Logistic Regression, and Generalized Linear Model processes and models are built for each of these processes using the Auto data set from the ISLR package in R to provide comparison information between them in terms of accuracy given the same problem.
+
+In this problem we will develop a model to predict whether a given car gets high or low gas mileage based on the __Auto__ data set.  
+
+#### (a) Create a binary variable __mpg01__, that contains a __1__ if __mpg__ contains a value above its median, and a __0__ if __mpg__ contains a value below its median. You can compute the median using the __median()__ function. Note you may find it helpful to use the __data.frame()__ function to create a single data set containing both __mpg01__ and the other “__Auto__ variables.
+
+#### 1. Take a look at the median for mpg.
+
+Use the *median()* function on the argument *Auto\$mpg* to generate the median value for miles per gallon of the vehicles in the Auto data set. 
+
+```{r}
+median(Auto$mpg)
+```
+#### 2. Create variable mpg01 as described above
+
+```{r}
+mpg01 <- (Auto$mpg > median(Auto$mpg))*1
+```
+#### 3. Take a look at the variable *mpg01* using the functions summary(), str(), and head() to ensure output makes sense for mpg01 variable..
+
+```{r}
+summary(mpg01)
+str(mpg01)
+head(Auto$mpg, 30)
+head(mpg01, 30)
+```
+
+With the median value of mpg at 22.75 we can see that the output above makes sense. 
+
+#### 4.Create a data frame AutoData using the new variable *mpg01* from the Auto data set then look at the dimension and summary of the data frame.
+
+We have 392 cases and 10 attributes consisting of nine columns of numeric data and one column of factor data for the vehicle name. 
+
+The 'cylinders' data will need be encoded as a factor variable since it is categorical data. 
+
+```{r}
+AutoData <- data.frame(mpg01, Auto)
+dim(AutoData)
+summary(AutoData)
+str(AutoData)
+```
+
+
+### (b) Explore the data graphically in order to investigate the association between __mpg01__ and the other features. Which of the other features seem most likely to be useful in predictiong __mpg01__ ? Scatterplots and boxplots may be useful tools to answer this question. Describe your findings.
+
+#### 1. Look at the correlations between variables.
+
+```{r}
+cor(AutoData[, -10])
+AutoData$name <- NULL
+head(AutoData)
+```
+The strongest relationships between __mpg01__ and the oher variables is with __cylinders__, __displacement__, __horsepower__, and __weight__.
+
+#### 2. Run the pairs plot to visualize the relationships.
+
+```{r, fig.align="center"}
+pairs(~mpg01 + cylinders + displacement + horsepower + weight, AutoData, col = c("red", "cornflowerblue", "purple", "green"))
+```
+
+#### 3.Encode the cylinders variable as a factor.
+```{r}
+cylinders = as.factor(AutoData$cylinders)
+summary(cylinders)
+```
+#### 4. Show plots of the different variables versus *mpg01*
+
+We can look at pairs plots as shown below. 
+
+```{r, fig.align="center"}
+par(mfrow = c(2,2))
+plot(AutoData$cylinders, mpg01, col = "red", xlab = "cylinders", main = "cylinders vs. mpg01")
+plot(AutoData$displacement, mpg01, col = "red", xlab = "displacement", main = "displacement vs. mpg01")
+plot(AutoData$horsepower, mpg01, col = "red", xlab = "horsepower", main = "horsepower vs. mpg01")
+plot(AutoData$weight, mpg01, col = "red", xlab = "weight", main = "weight vs. mpg01")
+
+```
+
+And box plots of the same combinations as shown below which are not very visually useful. 
+
+```{r, fig.align='center'}
+par(mfrow = c(2,2))
+boxplot(mpg01 ~ cylinders, data = AutoData, main = "cylinders vs mpg01", 
+        xlab = "cylinders", col='blue')
+boxplot(mpg01 ~ displacement, data = AutoData, main = "displacement vs mpg01", 
+        xlab = "displacement", col='blue')
+boxplot(mpg01 ~ horsepower, data = AutoData, main = "horsepower vs mpg01", 
+        xlab = "horsepower", col='blue')
+boxplot(mpg01 ~ weight, data = AutoData, main = "weight vs mpg01", 
+        xlab = "weight", col='blue')
+
+```
+
+
+
+### (c) Split the data into a training set and a test set.
+
+The data is split into a $70$% training data set and the $30$% balance held out as the test set using the *CreateDataPartition()* function with the response *mpg01*. 
+
+```{r}
+set.seed(999)
+inTraining <- createDataPartition(AutoData$mpg01, p = 0.7, list = FALSE)
+
+training <- AutoData[inTraining, ]
+testing  <- AutoData[-inTraining, ]
+```
+
+#### 1. Verify the dimensions of the training and testing sets.
+
+
+```{r}
+dim(training)
+dim(testing)
+```
+
+### (d) Perform Linear Discriminant Analysis on the training data in order to predict ___mpg01___ using the variables that seemed most associated with __mpg01__ in (b). What is the test error of the model obtained ?
+
+Linear discriminant analysis models the probability distribution of the predictors $X$ separately in each of the response classes $Y$, i.e. we want to find $Pr(X=x\vert Y=k)$ and Bayes Theorem is used to flip these around into estimates for $Pr(Y=k\vert X=x)$. When the distributions are Gaussian this model is very close in form to logistic regression. The reasons for using LDA over logistic regression include the facts:
+ 
+- when the classes are well separated, the parameter estimates for the logistic regression model can be unstable. 
+- if *n* is small and the distribution of the predictors $X\sim N(\mu, \sigma^2)$, LDA is more stable than logistic regression. 
+- If we have more than two response classes $Y$, LDA is more popular. 
+
+#### Using Bayes Theorem for Classification
+
+If $k\geq 2$ and we want to classify an observation into one of $K$ classes where the qualitative response variable $Y$ can take on one of $K$ distinct and unordered values. We let $\pi_k$ be the *prior* probability that a randomly chosen observation comes from the $k$th class and let $f_k(x) \equiv Pr(X=x\vert Y=k)$ be the density function of $X$ for an observation from the $k$th class. $f_k(x)$ is relatively large if there is a high probability that an observation in the $k$th class has $X \approx x$ and $f_k(x)$ is relatively small if it is very unlikely that an observation in the $k$th class has $X\approx x$. 
+
+Bayes Theorem states that 
+
+$$Pr(Y=k\vert X=x) = \frac{\pi_k f_k(x)}{\sum_{l=1}^K\pi_l f_l(x)}$$
+
+Letting $p_k(x) = Pr(Y=k\vert X)$ we see that we can simply plug in estimates of $\pi_k$ and $f_k(X)$ into the formula which can be generated with the software that then takes care of the rest. We refer to $p_k(x)$ as the *posterior* probability that an observation $X=x$ belongs to the $k$th class given the predictor value for that observation. 
+
+Estimating $\pi_k$ is easy if we have a random sample of $Y$'s from the population but estimating $f_k(X)$ is more difficult. However, if we have an estimate for $f_k(x)$ then we can build a classifier that approximates the Bayes classifier. 
+
+By assuming that $X=(X_1, X_2, ...,X_p)$ is drawn from a multivariate Gaussian distribution, with a class specific mean vector and a common covariance matrix which we can write as $X\sim N(\mu, \Sigma)$ to indicate that $p$ has a multivariate Gaussian distribution. $E(X)=\mu$ is the mean of the $X$ vector with $p$ components and $Cov(X)=\Sigma$ is the $p\times p$ covariance matrix of $X$. 
+
+Formally, the multivariate Gaussian density is
+
+$$f(x)=\frac{1}{(2\pi)^{p/2}\vert \Sigma\vert^{1/2}}exp\Big(-\frac{1}{2}(x-\mu)^T\Sigma^{-1}(x-\mu)\Big)$$
+
+plugging the density function for the $k$th class, $f_k(X=x)$ into 
+
+$$Pr(Y=k\vert X=x) = \frac{\pi_k f_k(x)}{\sum_{l=1}^K\pi_l f_l(x)}$$
+and applying some algebra we see that the Bayes classifier assigns $X=x$ to the class for which
+
+$$\delta_k(x)=x^T\Sigma^{-1}\mu_k-\frac{1}{2}\mu_k^T\Sigma^{-1}\mu_k+\text{ log }\pi_k$$
+
+is the largest. The Bayes decision boundaries represent the set of values $x$ for which $\delta_k(x)=\delta_l(x)$.  In other words for which
+
+$$x^T\Sigma^{-1}\mu_k-\frac{1}{2}\mu_k^T\Sigma^{-1}\mu_k=x^T\Sigma^{-1}\mu_l-\frac{1}{2}\mu_l^T\Sigma^{-1}\mu_l, \text{ for } k\neq l$$
+
+The log $\pi_k$ term has disappeared because each of the three classes has the same number of training observations, thus $\pi_k$ is the same for each class. To estimate $\mu_1,...,\mu_k, \pi_1,...,\pi_k$ and $\Sigma$ we use similar conventions for the case where $p=1$
+
+$$\hat{\mu}_k=\frac{1}{n_k}\sum_{i:y_i=k}x_i$$
+$$\hat{\Sigma}=\frac{1}{n-K}\sum_{k=1}^K\sum_{i:y_i=k}(x_i-\hat{\mu}_k)^2$$
+$$\hat{\pi}_k=\frac{n_k}{n}$$
+
+The estimates are plugged into 
+$$\delta_k(x)=x^T\Sigma^{-1}\mu_k-\frac{1}{2}\mu_k^T\Sigma^{-1}\mu_k+\text{ log }\pi_k$$
+in order to assign a new observation $X=x$ to the class for which $\hat{\delta}_k(x)$ is the largest. This is a linear function of $x$ so the LDA decision rule depends on $x$ only through a linear combination of the elements. 
+
+The output for LDA often uses a *confusion matrix* to display the True status versus the predicted status for the qualitative response variable. Elements on the diagonal represent correct predictions and off-diagonal represent misclassifications.
+
+This introduces the terms *sensitivity* and *specificity* to characterize the performance of a classifier. Sensitivity is the percentage of correctly specified positive responses identified while specificity is the percentage of correctly specified negative responses that are identified. We call the true positive rate the *sensitivity* and the false positive rate, 1 - *specificity*
+
+The Bayes classifier works by assigning an observation to the class for which the posterior probability $p_k(X)$ is the largest. If we have two classes, say "*wrong*" and "*right*" we assign the observation to the "*wrong*" class if 
+$$Pr(\text{ wrong = Yes }\vert X=x)>0.5$$
+This creates a threshold of $50$% for the *posterior* probability of default in order to assign an observation to the "*wrong*" class. If we have concerns about mislabeling the prediction for the "*wrong*" class we can lower this threshold. We could, for example, label an observation with a posterior probability of being in the "*wrong*" class about 20% to the "*wrong*" class
+$$Pr(\text{ wrong = Yes }\vert X=x)>0.2$$
+We use the *receiver operating characteristics* curve, ROC curve, to simultaneously display the two types of errors for all possible thresholds where the overall performance of the classifier is given by the area under the ROC curve (the AUC) where the larger the percentage, the better the classifier. 
+
+To build out Linear Discriminant Analysis model we use the *lda()* function with *mpg01* as our response variable on the predictors *cylinders, displacement, horsepower* and *weight* using the training data and name this model *lda_m1*. 
+
+We also output the confusion matrix using the *table* function on the arguments *lda.pred* and the testing data with *mpg01* as the response. 
+
+```{r}
+lda_m1 <- lda(mpg01 ~ cylinders + displacement + horsepower
+              + weight, data = training)
+
+lda.pred <- predict(lda_m1, testing)$class
+
+table(lda.pred, testing$mpg01)
+```
+
+#### 1. Compute error for lda model m1.
+
+We want to know the error for the model to understand its accuracy. 
+
+```{r}
+error_lda <- mean(lda.pred != testing$mpg01)
+error_lda
+```
+
+### (e) Perform Quadratic Discriminant Analysis on the training data in order to predict __mpg01__ using the variables that seemed most associated with ____mpg01__ in (b). What is the test error of the model obtained?
+
+
+QDA assumes the observations come from a Gaussian distribution like LDA but QDA assumes each class has its own covariance matrix. QDA assumes that an observation from the $k$th class is of the form $X\sim N(\mu_k, \Sigma_k)$, where $\Sigma_k$ is a covariance matrix for the $k$th class. 
+
+In this assumption, the Bayes classifier assigns an observation $X=x$ to the class for which 
+
+$$\begin{aligned}
+\delta_k(x)&=-\frac{1}{2}(x-\mu_k)^T\Sigma_k^{-1}(x-\mu_k)-\frac{1}{2}\text{ log }\vert\Sigma_k\vert + \text{ log }\pi_k\\
+&=-\frac{1}{2}x^T\Sigma_k^{-1}x+x^T\Sigma_k^{-1}\mu_k-\frac{1}{2}\mu_k^T\Sigma_k^{-1}\mu_k-\text{ log }\vert\Sigma_k\vert + \text{ log }\pi_k\\
+\end{aligned}$$
+
+is the largest. The QDA classifier plugs estimates for $\Sigma_k, \mu_k$, and $\pi_k$ into the equation above and then assigning $X=x$ to the class for which the quantity is largest. Since $x$ appears as a quadratic equation, we call this classifier QDA. 
+
+The reasons for choosing LDA over QDA or vice versa have to do with the bias-variance tradeoff. When there are $p$ predictors, estimating the covariance matrix requires estimating $p(p+1)/2$ parameters. QDA estimates a separate covariance matrix for each class for a total of $Kp(p+1)/2$ parameters. If we have $50$ predictors this is some multiple of $(50*51)/2=1275$ for a significant jump in predictors. The LDA model assumes the $K$ classes share a common covariance matrix so that the LDA model becomes linear in $x$ so that there are $kp$ linear coefficients to estimate. Thus LDA is a less flexible classifer than QDA and has a significantly lower variance. The tradeoff comes from noting that if the LDA assumption of a common covariance matrix is incorrect then high bias can be an issue. 
+
+We build the Quadratic Discriminant Analysis model, *gda_m1* using the *qda()* function with *mpg_01* as the response variable and *cylinders, displacement, horsepower,* and *weight* as the predictors. 
+
+We also output the confusion matrix using the *table* function on the arguments *qda.pred* and the testing data with *mpg01* as the response. 
+
+```{r}
+qda_m1 <- qda(mpg01 ~ cylinders + displacement
+              + horsepower + weight, data = training)
+qda.pred <- predict(qda_m1, testing)$class
+
+table(qda.pred, testing$mpg01)
+```
+
+#### 1. Compute error for qda model m1
+
+We compute the error to have a measurement of the accuracy of our model. 
+
+```{r}
+error_qda <- mean(qda.pred != testing$mpg01)
+error_qda
+```
+
+### (f) Perform logistic regression on the training data in order to predict __mpg01__ using the variables that seemed most associated with __mpg01__ in (b). What is the test error of the model obtained?
+
+Logistic regression models the probability that the response variable belongs to a specific category where $Y = Pr(X)$ where $Pr(X)=Pr(Y=k\vert X=x)$ is the conditional probability of the response $Y$ given the predictor(s) $X$. Because this is a probability we need outputs bounded from $0$ to $1$ for all values of $X$. In simple logistic regression we use the logistic function for this purpose where
+
+$$Pr(X)=\frac{e^{\beta_0+\beta_1X_1}}{1+e^{\beta_0+\beta_1X_1}}$$
+To fit this model we use the maximum likelihood function where we seek to maximize the likelihood function to find the estimates of our predictor coefficients 
+
+$$l(\beta_0, \beta_1)=\prod_{i:y_i=1}p(x_i)\prod_{i^\prime :y_i^\prime} (1-p(x_i^\prime))$$
+where the estimates $\hat{\beta}_0$ and $\hat{\beta}_1$ are chosen to maximize this likelihood. 
+
+We find the *odds* by manipulating $Pr(X)$ to get 
+
+$$log\Big(\frac{p(X)}{1-p(X)}\Big) = \beta_0+\beta_1X_1$$
+
+
+where the left hand side is the logit function or log-odds function. 
+
+Multiple logistic regression simply expands upon this model as in multiple linear regression. 
+
+$$Pr(X)=\frac{e^{\beta_0+\beta_1X_1+...+\beta_pX_p}}{1+e^{\beta_0+\beta_1X_1+...+\beta_pX_p}}$$
+and the logit function can be generalized as
+
+$$log\Big(\frac{p(X)}{1-p(X)}\Big) = \beta_0+\beta_1X_1+...+\beta_pX_p$$
+
+And, as with the simple logistic regression, we use the maximum likelihood function to estimate $\beta_0, \beta_1,...,\beta_p$
+
+We build the Logistic Regression model, *logisticR_m1* using the generalized linear model, *glm()*, function with *mpg_01* as the response variable and *cylinders, displacement, horsepower,* and *weight* as the predictors on the training data using the binomial family for the logit function. 
+
+We also output the confusion matrix using the *table* function on the arguments *logisticR_m1* and the testing data with *mpg01* as the response. 
+
+
+```{r}
+logisticR_m1 <-glm(mpg01 ~ cylinders + displacement + horsepower + weight, data = training, family = binomial)
+
+logisticR.prob <- predict(logisticR_m1, testing, type = "response")
+
+logisticR.pred <- ifelse(logisticR.prob > 0.5, 1, 0)
+
+table(logisticR.pred, testing$mpg01)
+```
+
+#### 1. compute the error for logistic regression model logisticR_m1.
+
+We want the error to have a metric to understand the strength of our model.
+
+```{r}
+error_glm <- mean(logisticR.pred != testing$mpg01)
+error_glm
+```
+
+### (g) Perform KNN on the training data, with K = 3, in order to predict __mpg01__ using the variables that seemed most associated with __mpg01__ in (b). What test errors do you obtain? 
+
+Given a positive integer $K$ and a test observation $x_0$, the $K$-nearest neighbors, KNN, classifier identifies the $K$ closest points to $x_0$, represented by $N_0$ then estimates the conditional probability for class $j$ as the proportion of points in $N_0$ whose response values equal $j$:
+$$Pr(Y=j\vert X=x_0)=\frac{1}{K}\sum_{i\in N_0}I(y_i=j)$$
+Then KNN applies Bayes rule and classifies the teset observation $x_0$ to the class with the largest probability. 
+
+KNN can produce classifiers that are very close in predictive ability to the optimal Bayes classifier although the choice of $K$ can have a large effect on the KNN classifier obtained. At $K=1$ the decision boundary is highly flexible and finds patterns in the boundary that don't match the Bayes decision boundary with low bias but very high variance. With a large $K$ we have less flexibility and a low variance, high bias classifier. 
+
+We build our KNN model by using the *cbind()* function to bind the variables of interest together into a matrix for the test and the training data. We then use the *knn()* function on the *test* and *train* matrices with our $K$ value set at $3$ and also create a *confusion matrix* to have a better understanding of the model findings.  
+
+```{r}
+training.X <- cbind(training$cylinders, training$displacement, training$horsepower, training$weight)
+testing.X <- cbind(testing$cylinders, testing$displacement, testing$horsepower, testing$weight)
+
+knn.pred <- knn(training.X, testing.X, training$mpg01, k = 3)
+
+table(knn.pred, testing$mpg01)
+```
+
+#### 1. compute the error for knn model.
+
+The error provides a strength of fit measure for the model that we can compare with our other classifier models. 
+
+```{r}
+error_knn <- mean(knn.pred != testing$mpg01)
+error_knn
+```
+
+### (h) Perform GAM on the training data in order to predict __mpg01__ using the variables that seemed most associated with __mpg01__ in (b). What test error do you obtain? 
+
+Generalized Additive Models (GAMs) allow the extension of a standard linear model by allowing non-linear functions of each of the variables while maintaining additivity. GAMs can be used to extend multiple linear regression as well as in situation where $Y$ is a qualitative variable which is what we are concerned with here in the classification setting. 
+
+Assume for simplicity that $Y$ takes on the values $0$ or $1$ and let $p(X)=Pr(Y=1\vert X)$ be the conditional probability (given the predictors) that the response equals one. 
+
+From the logistic regression model 
+
+$$log\Big(\frac{p(X)}{1-p(X)}\Big)=\beta_0+\beta_1X_1+\beta_2X_2+...+\beta_pX_p$$
+This *logit* is the log of the odds of $P(Y=1\vert X)$ versus $P(Y-0\vert X)$ which  represents as a linear function of the predictors. We extend this to use non-linear functions using the model
+
+$$log\Big(\frac{p(X)}{1-p(X)}\Big)=\beta_0+f_1(X_1)+f_2(X_2)+...+f_p(X_p)$$
+
+We build the GAM model *gam_m1* using the *gam()* function and using the spline function *s()* on the predictor 'cylinders' and the tensor product functions, *ti()* and *te()* on the interaction terms of interest and using the logit function by selecting the binomial family. 
+
+```{r}
+gam_m1 <- gam(mpg01 ~ s(cylinders, k = 3) + ti(displacement) + te(weight, horsepower), data = training, family = binomial)
+
+gam_m1.prob <- predict(gam_m1, data = testing, type = "response")
+
+gam_m1.pred <- rep(0, length(gam_m1.prob))
+
+gam_m1.pred[gam_m1.prob > 0.5] <- 1
+```
+
+Using the *plot.gam()* function we can visualize the model output. 
+```{r}
+plot.gam(gam_m1, se=TRUE, col='red')
+```
+
+We can output the error of our model. 
+
+```{r}
+error_gam <- mean(gam_m1.pred != testing$mpg01)
+error_gam
+```
+
+

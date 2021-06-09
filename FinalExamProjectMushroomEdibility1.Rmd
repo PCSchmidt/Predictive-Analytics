@@ -1,0 +1,448 @@
+---
+subtitle: "Predictive Analytics on Wild Mushroom Dataset"
+date: "12/12/2019"
+output:
+  html_document: default
+  pdf_document: default
+  beamer_presentation: default
+  powerpoint_presentation: default
+authors: Chris Schmidt
+---
+
+```{r echo=FALSE, fig.cap="Good?, Bad?, Indifferent?", out.width = '75%'}
+knitr::include_graphics("C:/Users/pchri/Chris Schmidt/Towson Stuff/Predictive Analytics Math 647/FinalProjMath647/Images/mushroom_satan.jpg")
+```
+
+### Exploration of CART, Naive Bayes Classifier, Random Forests, and Linear Discriminant Analysis modeling and perform cross validation
+
+This project evaluates four model options to determine the best predictive ability for deciding if a wild mushroom is edible or poisonous. We explore Classification and Regression Trees (CART), Naive Bayes Classifier, Random Forests, and Linear Discriminant Analysis. 
+
+
+```{r setup, include=FALSE}
+## By default, show code for all chunks in the knitted document,
+## as well as the output. To override for a particular chunk
+## use echo = FALSE in its options.
+knitr::opts_chunk$set(echo = TRUE) 
+
+## Set the default size of figures
+knitr::opts_chunk$set(fig.width=8, fig.height=5)
+
+set.seed(123)
+
+my_packages <- c("caret", "skimr", "DAAG", "RANN", "randomForest", "gbm", "xgboost", "caretEnsemble", "C50", "dplyr", "Amelia", "corrplot", "RCurl", "jsonlite", "skimr", "tidyverse", "naivebayes", "e1071", "rpart", "corrplot", "klaR")
+
+my_packages <- subset(my_packages, subset=!my_packages %in% rownames(installed.packages()))
+
+if (length(my_packages >0)) install.packages(my_packages, repos = "http://cran.rstudio.com")
+```
+
+```{r, message=F}
+## Load the libraries we will be using
+library(gapminder)
+library(here)
+library(socviz)
+library(tidyverse)
+library(data.table)
+library(caret)
+library(rpart)
+library(corrplot)
+library(klaR)
+```
+
+### Load the dataset and perform EDA
+
+#### Load the mushroom dataset. 
+Data downloaded from https://archive.ics.uci.edu/ml/datasets/Mushroom and saved as .data file "agaricus.lepiota.data".
+
+rename dataset as "MushroomData" and look at the structure of the dataset. 
+
+```{r}
+MushroomURL <- 'https://archive.ics.uci.edu/ml/machine-learning-databases/mushroom/agaricus-lepiota.data'
+MushroomData <- fread(MushroomURL)
+```
+
+```{r}
+str(MushroomData)
+```
+
+#### Clean the data for modeling.
+
+##### Our data structure includes all categorical variables with varying numbers of levels. Notice that the entities within each attribute are initials. So, for our first step, let's give the attributes their proper names.
+
+```{r}
+library(tidyverse)
+
+colnames(MushroomData) <- c("Edibility", "CapShape", "CapSurface",
+                        "CapColor", "Bruises", "Odor",
+                        "GillAttachment", "GillSpacing", "GillSize",
+                        "GillColor", "StalkShape", "StalkRoot",
+                        "StalkSurfaceAboveRing", "StalkSurfaceBelowRing", "StalkColorAboveRing",
+                        "StalkColorBelowRing", "VeilType", "VeilColor",
+                        "RingNumber", "RingType", "SporePrintColor",
+                        "Population", "Habitat")
+
+MushroomData <- MushroomData %>% map_df(function(.x) as.factor(.x))
+
+levels(MushroomData$Edibility) <- c("edible", "poisonous")
+levels(MushroomData$CapShape) <- c("bell", "conical", "flat", "knobbed", "sunken", "convex")
+levels(MushroomData$CapColor) <- c("buff", "cinnamon", "red", "gray", "brown", "pink",
+                                "green", "purple", "white", "yellow")
+levels(MushroomData$CapSurface) <- c("fibrous", "grooves", "scaly", "smooth")
+levels(MushroomData$Bruises) <- c("no", "yes")
+levels(MushroomData$Odor) <- c("almond", "creosote", "foul", "anise", "musty", "none", "pungent", "spicy", "fishy")
+levels(MushroomData$GillAttachment) <- c("attached", "free")
+levels(MushroomData$GillSpacing) <- c("close", "crowded")
+levels(MushroomData$GillSize) <- c("broad", "narrow")
+levels(MushroomData$GillColor) <- c("buff", "red", "gray", "chocolate", "black", "brown", "orange",
+                                 "pink", "green", "purple", "white", "yellow")
+levels(MushroomData$StalkShape) <- c("enlarging", "tapering")
+levels(MushroomData$StalkRoot) <- c("missing", "bulbous", "club", "equal", "rooted")
+levels(MushroomData$StalkSurfaceAboveRing) <- c("fibrous", "silky", "smooth", "scaly")
+levels(MushroomData$StalkSurfaceBelowRing) <- c("fibrous", "silky", "smooth", "scaly")
+levels(MushroomData$StalkColorAboveRing) <- c("buff", "cinnamon", "red", "gray", "brown", "pink",
+                                "green", "purple", "white", "yellow")
+levels(MushroomData$StalkColorBelowRing) <- c("buff", "cinnamon", "red", "gray", "brown", "pink",
+                                "green", "purple", "white", "yellow")
+levels(MushroomData$VeilType) <- "partial"
+levels(MushroomData$VeilColor) <- c("brown", "orange", "white", "yellow")
+levels(MushroomData$RingNumber) <- c("none", "one", "two")
+levels(MushroomData$RingType) <- c("evanescent", "flaring", "large", "none", "pendant")
+levels(MushroomData$SporePrintColor) <- c("buff", "chocolate", "black", "brown", "orange",
+                                        "green", "purple", "white", "yellow")
+levels(MushroomData$Population) <- c("abundant", "clustered", "numerous", "scattered", "several", "solitary")
+levels(MushroomData$Habitat) <- c("wood", "grasses", "leaves", "meadows", "paths", "urban", "waste")
+
+```
+
+#### Let's look at the data using styr().
+
+```{r}
+str(MushroomData)
+```
+
+##### Notice that VeilType has only one level, "partial", so we can remove this column from our data.
+
+```{r}
+MushroomData <- subset(MushroomData, 
+                       select = -c(VeilType))
+```
+
+#### Use summary() to take a different look at the composition of our data.
+
+```{r}
+summary(MushroomData)
+```
+
+#### Check for missing data using missmap() and sapply() to look for any NA's.
+
+```{r}
+library(Amelia)
+missmap(MushroomData)
+```
+
+```{r}
+sapply(data, function(MushroomData) sum(is.na(MushroomData)))
+```
+
+
+### Visual Examination of the Dataset.
+
+#### Mushroom Species Frequency by Cap Colors.
+
+```{r}
+list(unique(MushroomData$CapColor))
+```
+
+#### Plot of cap color by frequency.
+
+```{r}
+color <- table(MushroomData[4])
+color1 <- melt(color)
+color1<- as.data.frame(color1)
+color1 <- color1 %>% arrange(value)
+
+data=data.frame(id=c(1:10),individual=color1[1],
+                value=color1[2]
+)
+colnames(data) <-c("id","individual","value")
+
+ggplot(data, aes(x=as.factor(individual), y=value))+
+    geom_bar(stat="identity", aes(fill=individual))+
+    scale_fill_manual("legend", values = c( "orange", "pink", 
+    "red", "gray", "brown","pink", "green", "purple", 
+    "white","yellow"))+
+  ggtitle("Mushroom Species Frequency by Cap Colors")+
+  labs(y="Numbers", x = "Cap Color")
+
+```
+
+#### Mushroom Species Frequency by Cap Shape
+
+```{r}
+list(unique(MushroomData$CapShape))
+```
+
+#### Plot of cap shape by frequency.
+
+```{r}
+shape <- table(MushroomData[2])
+shape1 <- melt(shape)
+shape1<- as.data.frame(shape1)
+shape1 <- shape1 %>% arrange(value)
+
+data=data.frame(id=c(1:6),individual=shape1[1],
+                value=shape1[2]
+)
+colnames(data) <-c("id","individual","value")
+
+ggplot(data, aes(x=as.factor(individual), y=value))+
+    geom_bar(stat="identity", aes(fill=individual))+
+    scale_fill_manual("legend", values = c( "brown","pink", "green", "purple", "black","yellow"))+
+  ggtitle("Mushroom Species Frequency by Cap Shape")+
+  labs(y="Numbers", x = "Cap Shape")
+
+```
+
+#### Edibility of Mushrooms by Odor.
+
+```{r}
+list(unique(MushroomData$Odor))
+```
+
+#### Plot of odor of mushroom by frequency.
+
+```{r}
+odor_plot <-table(MushroomData[c(1,6)])
+barplot(odor_plot,legend.text=TRUE, beside=TRUE, col=c("green","red"), xlab = "Odor",ylab = "Number",
+        main="Bar Chart Showing the Edibility of Mushrooms by Odor", cex.names=.75)
+```
+
+#### Proportion of Edible Mushrooms
+
+```{r}
+odor_plot <-table(MushroomData[c(1)])
+pie(odor_plot, col=c("green","red"), 
+    main="Pie Chart Showing the Edibility of Mushrooms")
+```
+
+### Split the dataset into Test and Train sets
+
+```{r}
+# set seed for reproducibility
+set.seed(123)  
+# 1. Get row numbers for the training data
+InTraining <- createDataPartition(MushroomData$Edibility, p = 0.7, list = F)
+# 2. Create the training dataset 
+training <- MushroomData[InTraining, ]
+# 3. Create the testing dataset
+testing <- MushroomData[-InTraining, ]
+# 4. Create a label and set of predictors for use later.
+Label <- training$Edibility
+Predictors <- training[, 1:21]
+```
+
+
+### Modeling with the Data: 
+
+#### Model Number One: Classification and Regression Tree Model (CART) using rpart() function
+
+In a classification setting, like we have with our mushroom data, the idea is to use recursive binary splitting of the predictor space using a classification error rate, commonly the __Gini index__.  the Gini index is defined  by  
+
+$G = \sum_{k=1}^K \hat{p}_{mk}(1-\hat{p}_{mk})$  
+
+which is a measure of total variance across the $K$ classes. 
+
+An alternative that is used is __entropy__, given by $D = -\sum_{k=1}^K \hat{p}_{mk}\text{ log }\hat{p}_{mk}$.
+
+In both cases, the $\hat{p}_{mk}$ is the proportion of training observations in the *mth* region that are from the *kth* class. 
+
+```{r}
+library(rpart)
+library(rpart.plot)
+
+rpart.grid <- expand.grid(.cp = 0)
+trControl <- trainControl(method = "repeatedcv",
+                          number=10, 
+                          repeats=5, 
+                          verboseIter=F)
+
+rpart.model <- train(Edibility ~.,
+                     data = training,
+                     method = "rpart",
+                     trControl = trControl,
+                     tuneGrid = rpart.grid,
+                     metric = "Accuracy")
+rpart.model
+```
+
+#### Plot the Confusion Matrix
+
+```{r}
+caret::confusionMatrix(data=predict(rpart.model, 
+                                    type = "raw"), 
+                       reference = Label, 
+                       positive="edible")
+```
+
+#### Display the Model Split Details.
+
+```{r}
+rpart.model <- rpart(Edibility ~ ., 
+                    data = training, 
+                    method = "class", 
+                    cp = 0.00001)
+rpart.model
+```
+
+#### What are the most important predictors?
+
+```{r}
+varImp(rpart.model)
+```
+
+#### Finding the Lowest Cross-Validation Error
+
+```{r}
+printcp(rpart.model)
+```
+
+#### Plot Showing lowest X-Value Relative Error
+
+```{r}
+plotcp(rpart.model)
+```
+
+```{r}
+rpart.model$cptable[which.min(rpart.model$cptable[, "xerror"]), "CP"]
+```
+
+#### Pruning Tree with the Lowest Cross-Validation Error
+
+```{r}
+bestcp <- round(rpart.model$cptable[which.min(rpart.model$cptable[, "xerror"]), "CP"], 4)
+rpart.modelPruned <- prune(rpart.model, cp = bestcp)
+```
+
+#### Plot of Pruned Tree
+
+```{r}
+rpart.plot(rpart.modelPruned, 
+           extra = 104, 
+           box.palette = "GnBu", 
+           branch.lty = 3, nn = TRUE)
+
+```
+
+### Model Number Two: Naive Bayes Classifier using naiveBayes() from e1071 package
+
+The well known Bayes formula for conditional probability,  
+
+$P(A \cap B) = P(A,B) = P(A)P(B\vert A) = P(B)P(A \vert B) \Rightarrow P(B\vert A) = \frac{P(B)P(A\vert B)}{(P(A)}$   
+
+is used in this package to create a classifier.   
+
+In a classification problem, we have some predictors (also called independent variables, covariates, and features) and a result that is our dependent variable (or our target, label, or class). Each of the observations in our dataset has some values for the predictors and a class. From this information we can create a learner that predicts the class for the given features.  
+
+In the Naive Bayes algorithm, as probability for each label when the predictors values are given. We want to find the label, or class, with the highest probability. The algorithm assumes independence of the features which, if is largely true for a given dataset will usually generate a very accurate model.    
+
+
+```{r, warning=F}
+library(e1071)
+
+naiveBayes.model <- train(Edibility ~. , 
+                          method = "nb",
+                          data = training,
+                          trainControl = trainControl("cv", 
+                                                      number=10))
+naiveBayes.model
+```
+
+#### Make a prediction using test set.
+
+```{r}
+naiveBayes.model_pred <- predict(naiveBayes.model, 
+                                 newdata = testing)
+```
+
+#### Evaluate the model with a confusion matrix
+
+```{r}
+confusionMatrix(naiveBayes.model_pred, 
+                testing$Edibility)
+```
+
+### Model Number Three: Random Forest Classifier using randomForest() from the randomForest package
+
+Random forest algorithms use a major modification to the bagging algorithm that involves building a large collection of __decorrelated trees__ and then takes the average over all of them. 
+
+```{r}
+library(randomForest)
+
+randomForest.model <- train(Edibility ~.,
+                            data = training,
+                            method = "rf",
+                            metric = "Accuracy",
+                            ntree = 500, 
+                            trainControl=trainControl(method = "cv", 
+                                                      number = 10),
+                            tuneGrid = expand.grid(.mtry = c(2,3,4,5)))
+randomForest.model
+```
+
+#### Look at a plot of the results
+
+```{r}
+plot(randomForest.model)
+```
+
+#### Make a prediction using the model.
+
+```{r}
+randomForest.model_pred <- predict( randomForest.model, 
+                                    newdata = testing)
+
+mean((randomForest.model_pred!=testing$Edibility)^2) 
+```
+
+### Model Number Four: Linear Discriminant Analysis using lda() from the MASS package
+
+Linear discriminant analysis uses an approach to a modification of Bayes theorem to assign the posterior probability, $p_{k}(x)$ that an $X=x$ observation belongs to the *kth* class. We assume the $X$'s are drawn from a multivariate Gaussian distribution with a class-specific vector and a common covariance matrix. 
+
+```{r}
+#LDA
+library(MASS)
+library(MASS)
+lda.model <- lda(Edibility~CapShape+CapSurface+CapColor+Bruises+Odor+GillAttachment+GillSpacing+GillSize+GillColor+StalkShape+StalkRoot+StalkSurfaceAboveRing+StalkSurfaceBelowRing+VeilColor+SporePrintColor+Population+Habitat, data = training)
+
+lda.modelPredict <- predict(lda.model, 
+                newdata = data.frame(testing))
+
+mean(lda.modelPredict$class!=testing$Edibility)
+```
+
+#### 10-Fold Cross Validation for LDA Model.
+
+```{r}
+MAE=c()
+mae=c()
+
+for (i in 1:10){
+train_data <- MushroomData[-((i*568-567):(i*568)), ]
+test_data <- MushroomData[((i*568-567):(i*568)), ]
+
+lda.model <- lda(Edibility~CapShape+CapSurface+CapColor+Bruises+Odor+
+            GillAttachment+GillSpacing+GillSize+GillColor+
+            StalkShape+StalkRoot+StalkSurfaceAboveRing+
+            StalkSurfaceBelowRing+VeilColor+SporePrintColor+
+            Population+Habitat, data=train_data)
+
+lda.modelPredict <- predict(lda.model, test_data)
+
+mae=c(mae, mean(lda.modelPredict$class!=test_data$Edibility))
+}
+
+MAE4=c(MAE,mean(mae))
+MAE4
+
+```
+
